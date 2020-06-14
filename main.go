@@ -13,6 +13,9 @@ var AMQP_CONNECTION_URL string = os.Getenv("AMQP_CONNECTION_URL")
 func main() {
 	var error error
 
+	// output environment variables
+	log.Println("AMQP_CONNECTION_URL =", AMQP_CONNECTION_URL)
+
 	docker, error := DockerAPI.Setup()
 	if error != nil {
 		log.Fatalln("Cannot connect to Docker host.", error)
