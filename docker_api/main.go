@@ -3,6 +3,8 @@ package docker_api
 import (
 	"context"
 
+	DockerTypes "github.com/docker/docker/api/types"
+	DockerContainer "github.com/docker/docker/api/types/container"
 	DockerClient "github.com/docker/docker/client"
 )
 
@@ -10,6 +12,26 @@ import (
 type Docker struct {
 	Context context.Context
 	Client  *DockerClient.Client
+}
+
+// StopBuildContainer Stops a build container.
+func (docker *Docker) StopBuildContainer(containerName string) (error error) {
+	error = docker.Client.ContainerRemove(docker.Context, containerName, DockerTypes.ContainerRemoveOptions{
+		Force: true,
+	})
+
+	return error
+}
+
+// StartBuildContainer Starts a new build container for with repository.
+func (docker *Docker) StartBuildContainer(containerName string, repository string) (containerID string, error error) {
+	container, error := docker.Client.ContainerCreate(docker.Context, &DockerContainer.Config{
+		Image: "statikk:build",
+		Env:   []string{"REPOSITORY=" + repository},
+	}, nil, nil, containerName)
+
+	error = docker.Client.ContainerStart(docker.Context, container.ID, DockerTypes.ContainerStartOptions{})
+	return container.ID, error
 }
 
 // Setup Setups the Docker client.

@@ -11,9 +11,51 @@ import (
 
 var AMQP_CONNECTION_URL string = os.Getenv("AMQP_CONNECTION_URL")
 
+func HandleStartBuildContainer(consumer *RabbitMQ.Consumer, repository string, repositoryID string) {
+	log.Println("Starting build container for", repositoryID)
+	_, error := consumer.Docker.StartBuildContainer(repositoryID, repository)
+
+	if error != nil {
+		log.Println("Failed to start build container for", repositoryID)
+		log.Printf("Reason: %s\n", error)
+		return
+	}
+}
+
+func HandleStopBuildContainer(consumer *RabbitMQ.Consumer, repositoryID string) {
+	log.Println("Stopping build container ", repositoryID)
+	error := consumer.Docker.StopBuildContainer(repositoryID)
+
+	if error != nil {
+		log.Printf("Cannot remove container %s: %s\n", repositoryID, error)
+	} else {
+		log.Printf("Build stoped for %s.\n", repositoryID)
+	}
+}
+
 func HandleDelivery(consumer *RabbitMQ.Consumer, deliveries <-chan AMQP.Delivery) {
 	for delivery := range deliveries {
-		log.Println(delivery)
+		action := delivery.Headers["action"].(string)
+
+		repository := delivery.Headers["repository"]
+		repositoryID := delivery.Headers["repository-id"]
+
+		switch action {
+		case "start":
+			if repository != nil && repositoryID != nil {
+				go HandleStartBuildContainer(consumer, repository.(string), repositoryID.(string))
+			} else {
+				log.Printf("[%d] Cannot stop container.\n", delivery.DeliveryTag)
+				log.Println("Reason: The field `repository-id` or `repository` is missing from message headers.")
+			}
+		case "stop":
+			if repositoryID != nil {
+				go HandleStopBuildContainer(consumer, repositoryID.(string))
+			} else {
+				log.Printf("[%d] Cannot stop container.\n", delivery.DeliveryTag)
+				log.Println("Reason: The field `repository-id` is missing from message headers.")
+			}
+		}
 	}
 
 	log.Println("The deliveries channel has been closed.")
