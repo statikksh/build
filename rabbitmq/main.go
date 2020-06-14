@@ -2,7 +2,7 @@ package rabbitmq
 
 import (
 	DockerAPI "github.com/statikksh/build/docker_api"
-	AMQP "github.com/streadway/aqmp"
+	AMQP "github.com/streadway/amqp"
 )
 
 // Consumer Represents a RabbitMQ consumer
