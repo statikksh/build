@@ -22,6 +22,24 @@ func (consumer *Consumer) Connect(amqpConnectionURL string) (error error) {
 	return error
 }
 
+// OpenChannel Opens a new RabbitMQ channel.
+func (consumer *Consumer) OpenChannel() (error error) {
+	consumer.Channel, error = consumer.Connection.Channel()
+	return error
+}
+
+// DeclareQueue Declares a new RabbitMQ queue.
+func (consumer *Consumer) DeclareQueue(queue string, durable bool) (resultQueue AMQP.Queue, error error) {
+	resultQueue, error = consumer.Channel.QueueDeclare(queue, durable, false, false, true, nil)
+	return resultQueue, error
+}
+
+// Start Starts the consumer.
+func (consumer *Consumer) Start(queue AMQP.Queue) (deliveries <-chan AMQP.Delivery, error error) {
+	deliveries, error = consumer.Channel.Consume(queue.Name, consumer.Tag, true, false, true, true, nil)
+	return deliveries, error
+}
+
 // CreateConsumer Creates a new AQMP consumer
 func CreateConsumer(consumerTag string, docker DockerAPI.Docker) *Consumer {
 	consumer := &Consumer{
