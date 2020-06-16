@@ -2,6 +2,7 @@ package docker_api
 
 import (
 	"context"
+	"io"
 
 	DockerTypes "github.com/docker/docker/api/types"
 	DockerContainer "github.com/docker/docker/api/types/container"
@@ -32,6 +33,16 @@ func (docker *Docker) StartBuildContainer(containerName string, repository strin
 
 	error = docker.Client.ContainerStart(docker.Context, container.ID, DockerTypes.ContainerStartOptions{})
 	return container.ID, error
+}
+
+// GetLogStreamFromContainer Returns the log stream from a container by the ID.
+func (docker *Docker) GetLogStreamFromContainer(containerId string) (io.ReadCloser, error) {
+	return docker.Client.ContainerLogs(docker.Context, containerId, DockerTypes.ContainerLogsOptions{
+		Follow:     true,
+		ShowStderr: true,
+		ShowStdout: true,
+		Timestamps: true,
+	})
 }
 
 // Setup Setups the Docker client.

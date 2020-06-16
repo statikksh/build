@@ -1,12 +1,18 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 
 	DockerAPI "github.com/statikksh/build/docker_api"
+	LogPublisherUtil "github.com/statikksh/build/logpublisher"
 	RabbitMQ "github.com/statikksh/build/rabbitmq"
 	AMQP "github.com/streadway/amqp"
+)
+
+const (
+	buildLogsExchange = "statikk.build.logs"
 )
 
 var AMQP_CONNECTION_URL string = os.Getenv("AMQP_CONNECTION_URL")
@@ -18,6 +24,27 @@ func HandleStartBuildContainer(consumer *RabbitMQ.Consumer, repository string, r
 	if error != nil {
 		log.Println("Failed to start build container for", repositoryID)
 		log.Printf("Reason: %s\n", error)
+		return
+	}
+
+	logPublisher := LogPublisherUtil.LogPublisher{
+		Channel:    consumer.Channel,
+		Exchange:   buildLogsExchange,
+		RoutingKey: "",
+		Repository: repositoryID,
+	}
+
+	logs, error := consumer.Docker.GetLogStreamFromContainer(repositoryID)
+	if error != nil {
+		log.Println("Failed to get logs for container", repositoryID)
+		log.Printf("Reason: %s\n", error)
+
+		logPublisher.Write([]byte("Something wrong happened, logs are not available for this build."))
+		return
+	}
+
+	if _, error := io.Copy(&logPublisher, logs); error != nil {
+		log.Printf("Cannot publish log output of %s: %s\n", repositoryID, error.Error())
 		return
 	}
 }
@@ -89,6 +116,11 @@ func main() {
 	buildsQueue, error := consumer.DeclareQueue("builds", true)
 	if error != nil {
 		log.Fatalln("Cannot declare queue \"builds\".", error)
+	}
+
+	exchangeError := consumer.Channel.ExchangeDeclare(buildLogsExchange, "fanout", true, false, false, true, nil)
+	if exchangeError != nil {
+		log.Fatalln("Cannot declare fanout exchange ", buildLogsExchange, error)
 	}
 
 	deliveries, error := consumer.Start(buildsQueue)
