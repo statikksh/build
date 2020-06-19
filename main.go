@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -9,22 +10,24 @@ import (
 	LogPublisherUtil "github.com/statikksh/build/logpublisher"
 	RabbitMQ "github.com/statikksh/build/rabbitmq"
 	AMQP "github.com/streadway/amqp"
+	ErrorGroup "golang.org/x/sync/errgroup"
 )
 
 const (
 	buildLogsExchange = "statikk.build.logs"
+	statusExchange    = "statikk.build.status"
 )
 
 var AMQP_CONNECTION_URL string = os.Getenv("AMQP_CONNECTION_URL")
 
-func HandleStartBuildContainer(consumer *RabbitMQ.Consumer, repository string, repositoryID string) {
+func HandleStartBuildContainer(consumer *RabbitMQ.Consumer, repository string, repositoryID string) error {
 	log.Println("Starting build container for", repositoryID)
 	_, error := consumer.Docker.StartBuildContainer(repositoryID, repository)
 
 	if error != nil {
 		log.Println("Failed to start build container for", repositoryID)
 		log.Printf("Reason: %s\n", error)
-		return
+		return error
 	}
 
 	logPublisher := LogPublisherUtil.LogPublisher{
@@ -40,13 +43,15 @@ func HandleStartBuildContainer(consumer *RabbitMQ.Consumer, repository string, r
 		log.Printf("Reason: %s\n", error)
 
 		logPublisher.Write([]byte("Something wrong happened, logs are not available for this build."))
-		return
+		return error
 	}
 
 	if _, error := io.Copy(&logPublisher, logs); error != nil {
 		log.Printf("Cannot publish log output of %s: %s\n", repositoryID, error.Error())
-		return
+		return error
 	}
+
+	return nil
 }
 
 func HandleStopBuildContainer(consumer *RabbitMQ.Consumer, repositoryID string) {
@@ -60,6 +65,20 @@ func HandleStopBuildContainer(consumer *RabbitMQ.Consumer, repositoryID string) 
 	}
 }
 
+func SendBuildStatus(consumer *RabbitMQ.Consumer, repositoryID string, status string) {
+	error := consumer.Channel.Publish(statusExchange, "", false, false, AMQP.Publishing{
+		Headers: AMQP.Table{
+			"repository": repositoryID,
+			"status":     status,
+		},
+	})
+
+	if error != nil {
+		fmt.Println("Failed to send build status to", repositoryID)
+		fmt.Printf("Reason: %s\n", error)
+	}
+}
+
 func HandleDelivery(consumer *RabbitMQ.Consumer, deliveries <-chan AMQP.Delivery) {
 	for delivery := range deliveries {
 		action := delivery.Headers["action"].(string)
@@ -70,7 +89,19 @@ func HandleDelivery(consumer *RabbitMQ.Consumer, deliveries <-chan AMQP.Delivery
 		switch action {
 		case "start":
 			if repository != nil && repositoryID != nil {
-				go HandleStartBuildContainer(consumer, repository.(string), repositoryID.(string))
+				errors, _ := ErrorGroup.WithContext(consumer.Docker.Context)
+				errors.Go(func() error {
+					return HandleStartBuildContainer(consumer, repository.(string), repositoryID.(string))
+				})
+
+				error := errors.Wait()
+				if error != nil {
+					log.Println("The build on container", repositoryID, "has failed.")
+					SendBuildStatus(consumer, repositoryID.(string), "FAILED")
+				} else {
+					log.Println("The build on container", repositoryID, "has successfully ended.")
+					SendBuildStatus(consumer, repositoryID.(string), "SUCCESS")
+				}
 			} else {
 				log.Printf("[%d] Cannot stop container.\n", delivery.DeliveryTag)
 				log.Println("Reason: The field `repository-id` or `repository` is missing from message headers.")
@@ -121,6 +152,11 @@ func main() {
 	exchangeError := consumer.Channel.ExchangeDeclare(buildLogsExchange, "fanout", true, false, false, true, nil)
 	if exchangeError != nil {
 		log.Fatalln("Cannot declare fanout exchange ", buildLogsExchange, error)
+	}
+
+	statusExchangeError := consumer.Channel.ExchangeDeclare(statusExchange, "fanout", true, false, false, true, nil)
+	if statusExchangeError != nil {
+		log.Fatalln("Cannot declare fanout exchange ", statusExchange, error)
 	}
 
 	deliveries, error := consumer.Start(buildsQueue)
