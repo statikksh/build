@@ -1,3 +1,3 @@
 ### Statikk Builder
 
-The Statikk project build worker.
+The worker that builds websites from sources.
