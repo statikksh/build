@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/docker/docker/api/types"
 	DockerAPI "github.com/statikksh/build/docker_api"
 	LogPublisherUtil "github.com/statikksh/build/logpublisher"
 	RabbitMQ "github.com/statikksh/build/rabbitmq"
@@ -105,6 +106,16 @@ func HandleDelivery(consumer *RabbitMQ.Consumer, deliveries <-chan AMQP.Delivery
 			} else {
 				log.Printf("[%d] Cannot stop container.\n", delivery.DeliveryTag)
 				log.Println("Reason: The field `repository-id` or `repository` is missing from message headers.")
+			}
+
+			log.Println("Removing container " + repositoryID.(string) + "...")
+			error := consumer.Docker.Client.ContainerRemove(consumer.Docker.Context, repositoryID.(string), types.ContainerRemoveOptions{
+				Force: true,
+			})
+
+			if error != nil {
+				log.Println("Cannot remove build container", repositoryID)
+				log.Printf("Reason: %s\n", error)
 			}
 		case "stop":
 			if repositoryID != nil {
